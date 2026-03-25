@@ -5,7 +5,7 @@ const cron = require('node-cron');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- CREDENTIALS (set as environment variables on Render) ---
+// --- CREDENTIALS ---
 const XTREAM_URL      = process.env.XTREAM_URL || '';
 const XTREAM_USER     = process.env.XTREAM_USER || '';
 const XTREAM_PASS     = process.env.XTREAM_PASS || '';
@@ -14,28 +14,72 @@ const AUTH_TOKEN      = process.env.AUTH_TOKEN || 'MaryJane1905!';
 
 app.use(express.json());
 
+// --- EXTRACT CHANNEL NUMBER FROM PREFIX ---
+function extractChannelNumber(channelName) {
+  // Matches patterns like:
+  // (BTN+ 001), (CBC 01), (Dazn 001), (FLSP 001), (Peacock 001)
+  // ESPN+ 01, ESPN PLUS 001, MAX USA 01, NCAAB 01, Paramount+ 01
+  // CHL 01, TSN+ 01, Sportsnet+ 01, SEC+ ACCNX 001
+  // (Apple_F1_ 06), AU (STAN 01), (Victory+ 001)
+
+  // Format: "PREFIX | rest" - extract number from prefix before pipe
+  const pipeIdx = channelName.indexOf('|');
+  const prefix = pipeIdx >= 0 ? channelName.substring(0, pipeIdx) : channelName;
+
+  // Extract the number from the prefix
+  const numMatch = prefix.match(/(\d{2,3})/);
+  if (!numMatch) return null;
+
+  const num = numMatch[1];
+
+  // Determine the platform label for the channel number
+  const n = prefix.toUpperCase();
+  if (n.includes('BTN+') || n.includes('BTN +'))                return `BTN+ ${num}`;
+  if (n.includes('CBC'))                                          return `CBC ${num}`;
+  if (n.includes('CHL'))                                          return `CHL ${num}`;
+  if (n.includes('DAZN') && n.includes('CA'))                    return `DAZN CA ${num}`;
+  if (n.includes('DAZN') && n.includes('UK'))                    return `DAZN UK ${num}`;
+  if (n.includes('DAZN'))                                         return `DAZN ${num}`;
+  if (n.includes('ESPN PLUS'))                                    return `ESPN PLUS ${num}`;
+  if (n.includes('ESPN+') || n.includes('ESPN +'))               return `ESPN+ ${num}`;
+  if (n.includes('APPLE_F1') || n.includes('APPLE F1'))          return `Apple F1 ${num}`;
+  if (n.includes('FLSP') || n.includes('FLOSPORTS'))             return `FLSP ${num}`;
+  if (n.includes('MAX USA'))                                      return `MAX USA ${num}`;
+  if (n.includes('NCAAB'))                                        return `NCAAB ${num}`;
+  if (n.includes('PARAMOUNT+') || n.includes('PARAMOUNT +'))     return `Paramount+ ${num}`;
+  if (n.includes('PEACOCK'))                                      return `Peacock ${num}`;
+  if (n.includes('SEC+') && n.includes('ACCNX'))                 return `SEC+ ACCNX ${num}`;
+  if (n.includes('SEC+'))                                         return `SEC+ ${num}`;
+  if (n.includes('SPORTSNET+') || n.includes('SPORTSNET +'))     return `Sportsnet+ ${num}`;
+  if (n.includes('STAN'))                                         return `STAN ${num}`;
+  if (n.includes('TSN+') || n.includes('TSN +'))                 return `TSN+ ${num}`;
+  if (n.includes('VICTORY+') || n.includes('VICTORY +'))         return `Victory+ ${num}`;
+
+  return null;
+}
+
 // --- PLATFORM DETECTION ---
 function detectPlatform(channelName) {
   const n = channelName.toUpperCase();
-  if (n.includes('BTN+') || n.includes('BTN +'))                      return 'Big Ten+';
-  if (n.includes('CBC'))                                               return 'CBC';
-  if (n.includes('CHL'))                                               return 'CHL';
-  if (n.includes('DAZN') && n.includes('CA'))                         return 'DAZN CA';
-  if (n.includes('DAZN') && n.includes('UK'))                         return 'DAZN UK';
-  if (n.includes('DAZN'))                                              return 'DAZN';
-  if (n.includes('ESPN PLUS') || n.includes('ESPN+'))                  return 'ESPN+';
-  if (n.includes('APPLE_F1') || n.includes('APPLE F1'))               return 'F1 (Apple TV+)';
-  if (n.includes('FLSP') || n.includes('FLOSPORTS'))                  return 'FloSports';
-  if (n.includes('MAX USA') || n.includes('HBO MAX'))                  return 'HBO Max';
-  if (n.includes('NCAAB'))                                             return 'NCAAB';
-  if (n.includes('PARAMOUNT+') || n.includes('PARAMOUNT +'))          return 'Paramount+';
-  if (n.includes('PEACOCK'))                                           return 'Peacock';
-  if (n.includes('SEC+') || n.includes('ACCNX'))                      return 'SEC+/ACC Extra';
-  if (n.includes('SPORTSNET+') || n.includes('SPORTSNET +'))          return 'Sportsnet+';
-  if (n.includes('STAN'))                                              return 'Stan';
-  if (n.includes('TENNIS'))                                            return 'Tennis';
-  if (n.includes('TSN+') || n.includes('TSN +'))                      return 'TSN+';
-  if (n.includes('VICTORY+') || n.includes('VICTORY +'))              return 'Victory+';
+  if (n.includes('BTN+') || n.includes('BTN +'))                return 'Big Ten+';
+  if (n.includes('CBC'))                                          return 'CBC';
+  if (n.includes('CHL'))                                          return 'CHL';
+  if (n.includes('DAZN') && n.includes('CA'))                    return 'DAZN CA';
+  if (n.includes('DAZN') && n.includes('UK'))                    return 'DAZN UK';
+  if (n.includes('DAZN'))                                         return 'DAZN';
+  if (n.includes('ESPN PLUS') || n.includes('ESPN+'))            return 'ESPN+';
+  if (n.includes('APPLE_F1') || n.includes('APPLE F1'))          return 'F1 (Apple TV+)';
+  if (n.includes('FLSP') || n.includes('FLOSPORTS'))             return 'FloSports';
+  if (n.includes('MAX USA') || n.includes('HBO MAX'))            return 'HBO Max';
+  if (n.includes('NCAAB'))                                        return 'NCAAB';
+  if (n.includes('PARAMOUNT+') || n.includes('PARAMOUNT +'))     return 'Paramount+';
+  if (n.includes('PEACOCK'))                                      return 'Peacock';
+  if (n.includes('SEC+') || n.includes('ACCNX'))                 return 'SEC+/ACC Extra';
+  if (n.includes('SPORTSNET+') || n.includes('SPORTSNET +'))     return 'Sportsnet+';
+  if (n.includes('STAN'))                                         return 'Stan';
+  if (n.includes('TENNIS'))                                       return 'Tennis';
+  if (n.includes('TSN+') || n.includes('TSN +'))                 return 'TSN+';
+  if (n.includes('VICTORY+') || n.includes('VICTORY +'))         return 'Victory+';
   return null;
 }
 
@@ -44,15 +88,22 @@ function parseChannelName(channelName) {
   let title = '';
   let timeInfo = null;
 
-  // Format 1: "PREFIX | Title (datetime)"
-  const pipeMatch = channelName.match(/\|\s*(.+?)\s*\((\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}(?::\d{2})?)\)/);
-  if (pipeMatch) {
-    title = pipeMatch[1].trim();
-    timeInfo = { type: 'iso', value: pipeMatch[2] };
+  // Format 1: "PREFIX | Title (ISO datetime)"
+  // e.g. "(UK) (Dazn 001) | Chess.com Open (2026-03-25 16:00:00)"
+  const pipeISOMatch = channelName.match(/\|\s*(.+?)\s*\((\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}(?::\d{2})?)\)/);
+  if (pipeISOMatch) {
+    title = pipeISOMatch[1].trim();
+    timeInfo = { type: 'iso', value: pipeISOMatch[2] };
     return { title, timeInfo };
   }
 
-  // Format 2: "PREFIX: Title (3.25 7:00 PM ET)"
+  // Format 2: "PREFIX | Title" with no time (pipe but no datetime)
+  const pipeNoTimeMatch = channelName.match(/\|\s*(.+)$/);
+  if (pipeNoTimeMatch && !channelName.match(/\d{4}-\d{2}-\d{2}/)) {
+    // Has pipe but no ISO date - skip
+  }
+
+  // Format 3: "PREFIX: Title (3.25 7:00 PM ET)"
   const dotDateMatch = channelName.match(/[:|]\s*(.+?)\s*\((\d{1,2}\.\d{2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT)?)\)/i);
   if (dotDateMatch) {
     title = dotDateMatch[1].trim();
@@ -60,7 +111,7 @@ function parseChannelName(channelName) {
     return { title, timeInfo };
   }
 
-  // Format 3: "PREFIX: Title (03.25 2AM ET/11PM PT)"
+  // Format 4: "PREFIX: Title (03.25 2AM ET/11PM PT)"
   const espnPlusMatch = channelName.match(/[:|]\s*(.+?)\s*\((\d{2}\.\d{2})\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM)\s*(?:ET|EST|EDT)?)/i);
   if (espnPlusMatch) {
     title = espnPlusMatch[1].trim();
@@ -68,23 +119,26 @@ function parseChannelName(channelName) {
     return { title, timeInfo };
   }
 
-  // Format 4: "PREFIX: Title @ Mon DD HH:MM AM/PM TZ"
-  const atMatch = channelName.match(/[:|]\s*(.+?)\s*@\s*(\w{3}\s+\d{1,2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)?)/i);
-  if (atMatch) {
-    title = atMatch[1].trim();
-    timeInfo = { type: 'monthday', date: atMatch[2].trim(), time: atMatch[3].trim() };
+  // Format 5: "PREFIX: Title @ Mon DD HH:MM AM/PM TZ"
+  // e.g. "ESPN+ 01 : Title @ Mar 25 09:00 AM ET"
+  const atMonDayMatch = channelName.match(/[:|]\s*(.+?)\s*@\s*(\w{3}\s+\d{1,2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)?)/i);
+  if (atMonDayMatch) {
+    title = atMonDayMatch[1].trim();
+    timeInfo = { type: 'monthday', date: atMonDayMatch[2].trim(), time: atMonDayMatch[3].trim() };
     return { title, timeInfo };
   }
 
-  // Format 5: "PREFIX: Title @ DD Mon HH:MM AM/PM TZ"
-  const atMatch2 = channelName.match(/[:|]\s*(.+?)\s*@\s*(\d{1,2}\s+\w{3})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)?)/i);
-  if (atMatch2) {
-    title = atMatch2[1].trim();
-    timeInfo = { type: 'daymonth', date: atMatch2[2].trim(), time: atMatch2[3].trim() };
+  // Format 6: "PREFIX: Title @ DD Mon HH:MM AM/PM TZ"
+  // e.g. "MAX USA 01 : Title @ 25 Mar 09:15 AM ET"
+  const atDayMonMatch = channelName.match(/[:|]\s*(.+?)\s*@\s*(\d{1,2}\s+\w{3})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)?)/i);
+  if (atDayMonMatch) {
+    title = atDayMonMatch[1].trim();
+    timeInfo = { type: 'daymonth', date: atDayMonMatch[2].trim(), time: atDayMonMatch[3].trim() };
     return { title, timeInfo };
   }
 
-  // Format 6: "PREFIX: Title (03.25 HH:MM AM/PM TZ)"
+  // Format 7: "PREFIX: Title (03.25 HH:MM AM/PM TZ)"
+  // e.g. "SEC+ ACCNX 001: Title (03.25 12:00 PM ET)"
   const secMatch = channelName.match(/[:|]\s*(.+?)\s*\((\d{2}\.\d{2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT)?)\)/i);
   if (secMatch) {
     title = secMatch[1].trim();
@@ -109,23 +163,20 @@ function timeInfoToUTC(timeInfo, currentYear) {
       const parts = timeInfo.date.split('.');
       const month = parseInt(parts[0]) - 1;
       const day   = parseInt(parts[1]);
-      const year  = currentYear;
       const [hours, minutes] = normalizeTime(timeInfo.time);
-      dt = new Date(Date.UTC(year, month, day, hours, minutes, 0));
+      dt = new Date(Date.UTC(currentYear, month, day, hours, minutes, 0));
       dt = applyTimezoneOffset(dt, timeInfo.time);
 
     } else if (timeInfo.type === 'monthday') {
-      const dateStr = `${timeInfo.date} ${currentYear}`;
-      const cleanTime = timeInfo.time.replace(/\s*(ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)\s*/i, '');
-      dt = new Date(`${dateStr} ${cleanTime}`);
+      const cleanTime = timeInfo.time.replace(/\s*(ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)\s*/i, '').trim();
+      dt = new Date(`${timeInfo.date} ${currentYear} ${cleanTime}`);
       if (isNaN(dt)) return null;
       dt = applyTimezoneOffset(dt, timeInfo.time);
 
     } else if (timeInfo.type === 'daymonth') {
       const parts = timeInfo.date.split(' ');
-      const dateStr = `${parts[1]} ${parts[0]} ${currentYear}`;
-      const cleanTime = timeInfo.time.replace(/\s*(ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)\s*/i, '');
-      dt = new Date(`${dateStr} ${cleanTime}`);
+      const cleanTime = timeInfo.time.replace(/\s*(ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)\s*/i, '').trim();
+      dt = new Date(`${parts[1]} ${parts[0]} ${currentYear} ${cleanTime}`);
       if (isNaN(dt)) return null;
       dt = applyTimezoneOffset(dt, timeInfo.time);
     }
@@ -247,7 +298,6 @@ async function generateAndPushEPG() {
   for (const ch of channels) {
     const platform = detectPlatform(ch.name);
     if (!platform) { skipped++; continue; }
-
     if (platform === 'Tennis') { skipped++; continue; }
 
     const parsed = parseChannelName(ch.name);
@@ -259,13 +309,24 @@ async function generateAndPushEPG() {
     const startDate = timeInfoToUTC(timeInfo, currentYear);
     if (!startDate || isNaN(startDate)) { skipped++; continue; }
 
+    // Extract channel number for display
+    const channelNum = extractChannelNumber(ch.name);
+    const displayTitle = channelNum
+      ? `${channelNum} - ${title}`
+      : title;
+
     const duration  = detectDuration(title);
     const endDate   = new Date(startDate.getTime() + duration * 60 * 1000);
     const preStart  = new Date(startDate.getTime() - 720 * 60 * 1000);
     const postEnd   = getNextDay6amEST(endDate);
 
-    const channelId   = `xtream-${platform.toLowerCase().replace(/[^a-z0-9]/g, '')}-${Buffer.from(title + startDate.toISOString()).toString('hex').slice(0, 12)}`;
-    const titleEsc    = escapeXML(title);
+    // Use channel number in the channel ID for auto-matching in IPTVEditor
+    const channelIdBase = channelNum
+      ? channelNum.toLowerCase().replace(/[^a-z0-9]/g, '-')
+      : Buffer.from(title + startDate.toISOString()).toString('hex').slice(0, 12);
+    const channelId = `xtream-${channelIdBase}`;
+
+    const titleEsc    = escapeXML(displayTitle);
     const platformEsc = escapeXML(platform);
     const dateStr     = startDate.toISOString().split('T')[0];
 
@@ -276,7 +337,7 @@ async function generateAndPushEPG() {
 
     // Channel block
     allChannelBlocks += `  <channel id="${channelId}">\n`;
-    allChannelBlocks += `    <display-name lang="en">${platformEsc}: ${titleEsc}</display-name>\n`;
+    allChannelBlocks += `    <display-name lang="en">${escapeXML(channelNum || title)}</display-name>\n`;
     allChannelBlocks += `  </channel>\n`;
 
     // Block 1: Up Next

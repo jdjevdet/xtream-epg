@@ -14,16 +14,24 @@ const AUTH_TOKEN      = process.env.AUTH_TOKEN || 'your-custom-token-here';
 
 app.use(express.json());
 
-// --- GENERATE EPG ID FROM STABLE PREFIX ---
+// --- GENERATE EPG ID FROM EVENT TITLE ---
 function generateEpgId(channelName) {
+  // Pipe format: "PREFIX | Title (datetime)"
+  const pipeMatch = channelName.match(/\|\s*(.+?)\s*\(\d{4}-\d{2}-\d{2}/);
+  if (pipeMatch) return pipeMatch[1].trim();
+
+  // Colon format with @ date: "PREFIX: Title @ Mon DD"
+  const colonAtMatch = channelName.match(/[:|]\s*(.+?)\s*@\s*\w{3}/);
+  if (colonAtMatch) return colonAtMatch[1].trim();
+
+  // Colon format with dot date: "PREFIX: Title (03.25"
+  const colonDotMatch = channelName.match(/[:|]\s*(.+?)\s*\(\d{2}\.\d{2}/);
+  if (colonDotMatch) return colonDotMatch[1].trim();
+
+  // Fallback: everything before the pipe
   const pipeIdx = channelName.indexOf('|');
-  if (pipeIdx >= 0) {
-    return channelName.substring(0, pipeIdx).trim();
-  }
-  const colonIdx = channelName.indexOf(':');
-  if (colonIdx >= 0) {
-    return channelName.substring(0, colonIdx).trim();
-  }
+  if (pipeIdx >= 0) return channelName.substring(0, pipeIdx).trim();
+
   return channelName.trim();
 }
 

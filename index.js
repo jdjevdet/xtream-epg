@@ -16,24 +16,15 @@ app.use(express.json());
 
 // --- EXTRACT CHANNEL NUMBER FROM PREFIX ---
 function extractChannelNumber(channelName) {
-  // Matches patterns like:
-  // (BTN+ 001), (CBC 01), (Dazn 001), (FLSP 001), (Peacock 001)
-  // ESPN+ 01, ESPN PLUS 001, MAX USA 01, NCAAB 01, Paramount+ 01
-  // CHL 01, TSN+ 01, Sportsnet+ 01, SEC+ ACCNX 001
-  // (Apple_F1_ 06), AU (STAN 01), (Victory+ 001)
-
-  // Format: "PREFIX | rest" - extract number from prefix before pipe
   const pipeIdx = channelName.indexOf('|');
   const prefix = pipeIdx >= 0 ? channelName.substring(0, pipeIdx) : channelName;
 
-  // Extract the number from the prefix
   const numMatch = prefix.match(/(\d{2,3})/);
   if (!numMatch) return null;
 
   const num = numMatch[1];
-
-  // Determine the platform label for the channel number
   const n = prefix.toUpperCase();
+
   if (n.includes('BTN+') || n.includes('BTN +'))                return `BTN+ ${num}`;
   if (n.includes('CBC'))                                          return `CBC ${num}`;
   if (n.includes('CHL'))                                          return `CHL ${num}`;
@@ -89,7 +80,6 @@ function parseChannelName(channelName) {
   let timeInfo = null;
 
   // Format 1: "PREFIX | Title (ISO datetime)"
-  // e.g. "(UK) (Dazn 001) | Chess.com Open (2026-03-25 16:00:00)"
   const pipeISOMatch = channelName.match(/\|\s*(.+?)\s*\((\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}(?::\d{2})?)\)/);
   if (pipeISOMatch) {
     title = pipeISOMatch[1].trim();
@@ -97,13 +87,7 @@ function parseChannelName(channelName) {
     return { title, timeInfo };
   }
 
-  // Format 2: "PREFIX | Title" with no time (pipe but no datetime)
-  const pipeNoTimeMatch = channelName.match(/\|\s*(.+)$/);
-  if (pipeNoTimeMatch && !channelName.match(/\d{4}-\d{2}-\d{2}/)) {
-    // Has pipe but no ISO date - skip
-  }
-
-  // Format 3: "PREFIX: Title (3.25 7:00 PM ET)"
+  // Format 2: "PREFIX: Title (3.25 7:00 PM ET)"
   const dotDateMatch = channelName.match(/[:|]\s*(.+?)\s*\((\d{1,2}\.\d{2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT)?)\)/i);
   if (dotDateMatch) {
     title = dotDateMatch[1].trim();
@@ -111,7 +95,7 @@ function parseChannelName(channelName) {
     return { title, timeInfo };
   }
 
-  // Format 4: "PREFIX: Title (03.25 2AM ET/11PM PT)"
+  // Format 3: "PREFIX: Title (03.25 2AM ET/11PM PT)"
   const espnPlusMatch = channelName.match(/[:|]\s*(.+?)\s*\((\d{2}\.\d{2})\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM)\s*(?:ET|EST|EDT)?)/i);
   if (espnPlusMatch) {
     title = espnPlusMatch[1].trim();
@@ -119,8 +103,7 @@ function parseChannelName(channelName) {
     return { title, timeInfo };
   }
 
-  // Format 5: "PREFIX: Title @ Mon DD HH:MM AM/PM TZ"
-  // e.g. "ESPN+ 01 : Title @ Mar 25 09:00 AM ET"
+  // Format 4: "PREFIX: Title @ Mon DD HH:MM AM/PM TZ"
   const atMonDayMatch = channelName.match(/[:|]\s*(.+?)\s*@\s*(\w{3}\s+\d{1,2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)?)/i);
   if (atMonDayMatch) {
     title = atMonDayMatch[1].trim();
@@ -128,8 +111,7 @@ function parseChannelName(channelName) {
     return { title, timeInfo };
   }
 
-  // Format 6: "PREFIX: Title @ DD Mon HH:MM AM/PM TZ"
-  // e.g. "MAX USA 01 : Title @ 25 Mar 09:15 AM ET"
+  // Format 5: "PREFIX: Title @ DD Mon HH:MM AM/PM TZ"
   const atDayMonMatch = channelName.match(/[:|]\s*(.+?)\s*@\s*(\d{1,2}\s+\w{3})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)?)/i);
   if (atDayMonMatch) {
     title = atDayMonMatch[1].trim();
@@ -137,8 +119,7 @@ function parseChannelName(channelName) {
     return { title, timeInfo };
   }
 
-  // Format 7: "PREFIX: Title (03.25 HH:MM AM/PM TZ)"
-  // e.g. "SEC+ ACCNX 001: Title (03.25 12:00 PM ET)"
+  // Format 6: "PREFIX: Title (03.25 HH:MM AM/PM TZ)"
   const secMatch = channelName.match(/[:|]\s*(.+?)\s*\((\d{2}\.\d{2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT)?)\)/i);
   if (secMatch) {
     title = secMatch[1].trim();
@@ -309,18 +290,14 @@ async function generateAndPushEPG() {
     const startDate = timeInfoToUTC(timeInfo, currentYear);
     if (!startDate || isNaN(startDate)) { skipped++; continue; }
 
-    // Extract channel number for display
     const channelNum = extractChannelNumber(ch.name);
-    const displayTitle = channelNum
-      ? `${channelNum} - ${title}`
-      : title;
+    const displayTitle = channelNum ? `${channelNum} - ${title}` : title;
 
     const duration  = detectDuration(title);
     const endDate   = new Date(startDate.getTime() + duration * 60 * 1000);
     const preStart  = new Date(startDate.getTime() - 720 * 60 * 1000);
     const postEnd   = getNextDay6amEST(endDate);
 
-    // Use channel number in the channel ID for auto-matching in IPTVEditor
     const channelIdBase = channelNum
       ? channelNum.toLowerCase().replace(/[^a-z0-9]/g, '-')
       : Buffer.from(title + startDate.toISOString()).toString('hex').slice(0, 12);
@@ -329,15 +306,23 @@ async function generateAndPushEPG() {
     const titleEsc    = escapeXML(displayTitle);
     const platformEsc = escapeXML(platform);
     const dateStr     = startDate.toISOString().split('T')[0];
+    const shortNum    = channelNum ? channelNum.replace(/\s+/g, ' ').trim() : null;
 
     const preStartXMLTV = toXMLTVDate(preStart);
     const startXMLTV    = toXMLTVDate(startDate);
     const endXMLTV      = toXMLTVDate(endDate);
     const postEndXMLTV  = toXMLTVDate(postEnd);
 
-    // Channel block
+    // Channel block with multiple display name variants for auto-matching
     allChannelBlocks += `  <channel id="${channelId}">\n`;
     allChannelBlocks += `    <display-name lang="en">${escapeXML(channelNum || title)}</display-name>\n`;
+    if (shortNum) {
+      allChannelBlocks += `    <display-name lang="en">US (${escapeXML(shortNum)})</display-name>\n`;
+      allChannelBlocks += `    <display-name lang="en">CA (${escapeXML(shortNum)})</display-name>\n`;
+      allChannelBlocks += `    <display-name lang="en">UK (${escapeXML(shortNum)})</display-name>\n`;
+      allChannelBlocks += `    <display-name lang="en">AU (${escapeXML(shortNum)})</display-name>\n`;
+      allChannelBlocks += `    <display-name lang="en">(${escapeXML(shortNum)})</display-name>\n`;
+    }
     allChannelBlocks += `  </channel>\n`;
 
     // Block 1: Up Next
@@ -381,6 +366,44 @@ async function generateAndPushEPG() {
 
   console.log(`[${new Date().toISOString()}] EPG pushed — ${totalEvents} events generated, ${skipped} skipped.`);
 }
+
+// --- DEBUG: Show skipped channels ---
+app.get('/debug-skipped', async (req, res) => {
+  try {
+    const currentYear = new Date().getUTCFullYear();
+    const channels = await fetchXtreamChannels();
+    const skipped = [];
+
+    for (const ch of channels) {
+      const platform = detectPlatform(ch.name);
+      if (!platform) {
+        skipped.push({ reason: 'no platform', name: ch.name });
+        continue;
+      }
+      if (platform === 'Tennis') continue;
+
+      const parsed = parseChannelName(ch.name);
+      if (!parsed || !parsed.timeInfo) {
+        skipped.push({ reason: 'no time parsed', platform, name: ch.name });
+        continue;
+      }
+
+      const startDate = timeInfoToUTC(parsed.timeInfo, currentYear);
+      if (!startDate || isNaN(startDate)) {
+        skipped.push({ reason: 'invalid date', platform, name: ch.name });
+        continue;
+      }
+    }
+
+    res.json({
+      total_skipped: skipped.length,
+      samples: skipped.slice(0, 100)
+    });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // --- MANUAL TRIGGER ENDPOINTS ---
 app.get('/run', async (req, res) => {

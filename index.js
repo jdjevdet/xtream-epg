@@ -297,7 +297,7 @@ async function generateAndPushEPG() {
 
     // Channel block
     allChannelBlocks += `  <channel id="${epgIdEsc}">\n`;
-    allChannelBlocks += `    <display-name lang="en">${fullNameEsc}</display-name>\n`;
+    allChannelBlocks += `    <display-name lang="en">${titleEsc}</display-name>\n`;
     allChannelBlocks += `    <display-name lang="en">${epgIdEsc}</display-name>\n`;
     allChannelBlocks += `  </channel>\n`;
 

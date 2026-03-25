@@ -9,8 +9,8 @@ const PORT = process.env.PORT || 3000;
 const XTREAM_URL      = process.env.XTREAM_URL || '';
 const XTREAM_USER     = process.env.XTREAM_USER || '';
 const XTREAM_PASS     = process.env.XTREAM_PASS || '';
-const RENDER_EPG_URL  = process.env.RENDER_EPG_URL || 'https://sports-epg-live.onrender.com/upload';
-const AUTH_TOKEN      = process.env.AUTH_TOKEN || 'MaryJane1905!';
+const RENDER_EPG_URL  = process.env.RENDER_EPG_URL || 'https://epg-live-v2.onrender.com/upload';
+const AUTH_TOKEN      = process.env.AUTH_TOKEN || 'your-custom-token-here';
 
 app.use(express.json());
 
@@ -42,39 +42,6 @@ function generateEpgId(channelName) {
   if (n.includes('STAN'))                                         return `stan${num}`;
   if (n.includes('TSN+') || n.includes('TSN +'))                 return `tsn+${num}`;
   if (n.includes('VICTORY+') || n.includes('VICTORY +'))         return `victory+${num}`;
-
-  return null;
-}
-
-// --- EXTRACT CHANNEL NUMBER FOR DISPLAY NAME ---
-function extractChannelNumber(channelName) {
-  const pipeIdx = channelName.indexOf('|');
-  const prefix = pipeIdx >= 0 ? channelName.substring(0, pipeIdx) : channelName;
-  const numMatch = prefix.match(/(\d{2,3})/);
-  if (!numMatch) return null;
-  const num = numMatch[1];
-  const n = prefix.toUpperCase();
-
-  if (n.includes('BTN+') || n.includes('BTN +'))                return `BTN+ ${num}`;
-  if (n.includes('CBC'))                                          return `CBC ${num}`;
-  if (n.includes('CHL'))                                          return `CHL ${num}`;
-  if (n.includes('DAZN') && n.includes('CA'))                    return `DAZN CA ${num}`;
-  if (n.includes('DAZN') && n.includes('UK'))                    return `DAZN UK ${num}`;
-  if (n.includes('DAZN'))                                         return `DAZN ${num}`;
-  if (n.includes('ESPN PLUS'))                                    return `ESPN PLUS ${num}`;
-  if (n.includes('ESPN+') || n.includes('ESPN +'))               return `ESPN+ ${num}`;
-  if (n.includes('APPLE_F1') || n.includes('APPLE F1'))          return `Apple F1 ${num}`;
-  if (n.includes('FLSP') || n.includes('FLOSPORTS'))             return `FLSP ${num}`;
-  if (n.includes('MAX USA'))                                      return `MAX USA ${num}`;
-  if (n.includes('NCAAB'))                                        return `NCAAB ${num}`;
-  if (n.includes('PARAMOUNT+') || n.includes('PARAMOUNT +'))     return `Paramount+ ${num}`;
-  if (n.includes('PEACOCK'))                                      return `Peacock ${num}`;
-  if (n.includes('SEC+') && n.includes('ACCNX'))                 return `SEC+ ACCNX ${num}`;
-  if (n.includes('SEC+'))                                         return `SEC+ ${num}`;
-  if (n.includes('SPORTSNET+') || n.includes('SPORTSNET +'))     return `Sportsnet+ ${num}`;
-  if (n.includes('STAN'))                                         return `STAN ${num}`;
-  if (n.includes('TSN+') || n.includes('TSN +'))                 return `TSN+ ${num}`;
-  if (n.includes('VICTORY+') || n.includes('VICTORY +'))         return `Victory+ ${num}`;
 
   return null;
 }
@@ -320,10 +287,7 @@ async function generateAndPushEPG() {
     const startDate = timeInfoToUTC(timeInfo, currentYear);
     if (!startDate || isNaN(startDate)) { skipped++; continue; }
 
-    const channelNum  = extractChannelNumber(ch.name);
-    const epgId       = generateEpgId(ch.name);
-    const displayTitle = channelNum ? `${channelNum} - ${title}` : title;
-
+    const epgId = generateEpgId(ch.name);
     if (!epgId) { skipped++; continue; }
 
     const duration  = detectDuration(title);
@@ -331,7 +295,9 @@ async function generateAndPushEPG() {
     const preStart  = new Date(startDate.getTime() - 720 * 60 * 1000);
     const postEnd   = getNextDay6amEST(endDate);
 
-    const titleEsc    = escapeXML(displayTitle);
+    // Use full original channel name as display name for testing
+    const fullName    = escapeXML(ch.name);
+    const titleEsc    = escapeXML(title);
     const platformEsc = escapeXML(platform);
     const dateStr     = startDate.toISOString().split('T')[0];
 
@@ -340,10 +306,9 @@ async function generateAndPushEPG() {
     const endXMLTV      = toXMLTVDate(endDate);
     const postEndXMLTV  = toXMLTVDate(postEnd);
 
-    // Channel block
+    // Channel block — full original name as display name
     allChannelBlocks += `  <channel id="${epgId}">\n`;
-    allChannelBlocks += `    <display-name lang="en">${escapeXML(channelNum || title)}</display-name>\n`;
-    allChannelBlocks += `    <display-name lang="en">${epgId}</display-name>\n`;
+    allChannelBlocks += `    <display-name lang="en">${fullName}</display-name>\n`;
     allChannelBlocks += `  </channel>\n`;
 
     // Block 1: Up Next

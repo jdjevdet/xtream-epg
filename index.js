@@ -14,36 +14,17 @@ const AUTH_TOKEN      = process.env.AUTH_TOKEN || 'your-custom-token-here';
 
 app.use(express.json());
 
-// --- GENERATE CLEAN EPG ID ---
+// --- GENERATE EPG ID FROM STABLE PREFIX ---
 function generateEpgId(channelName) {
-  const n = channelName.toUpperCase();
   const pipeIdx = channelName.indexOf('|');
-  const prefix = pipeIdx >= 0 ? channelName.substring(0, pipeIdx) : channelName;
-  const numMatch = prefix.match(/(\d{2,3})/);
-  const num = numMatch ? numMatch[1] : '001';
-
-  if (n.includes('BTN+') || n.includes('BTN +'))                return `btn+${num}`;
-  if (n.includes('CBC'))                                          return `cbc${num}`;
-  if (n.includes('CHL'))                                          return `chl${num}`;
-  if (n.includes('DAZN') && n.includes('CA'))                    return `cadazn${num}`;
-  if (n.includes('DAZN') && n.includes('UK'))                    return `ukdazn${num}`;
-  if (n.includes('DAZN'))                                         return `dazn${num}`;
-  if (n.includes('ESPN PLUS'))                                    return `espnplus${num}`;
-  if (n.includes('ESPN+') || n.includes('ESPN +'))               return `espn+${num}`;
-  if (n.includes('APPLE_F1') || n.includes('APPLE F1'))          return `applef1${num}`;
-  if (n.includes('FLSP') || n.includes('FLOSPORTS'))             return `flosports${num}`;
-  if (n.includes('MAX USA'))                                      return `maxusa${num}`;
-  if (n.includes('NCAAB'))                                        return `ncaab${num}`;
-  if (n.includes('PARAMOUNT+') || n.includes('PARAMOUNT +'))     return `paramount+${num}`;
-  if (n.includes('PEACOCK'))                                      return `peacock${num}`;
-  if (n.includes('SEC+') && n.includes('ACCNX'))                 return `sec+accnx${num}`;
-  if (n.includes('SEC+'))                                         return `sec+${num}`;
-  if (n.includes('SPORTSNET+') || n.includes('SPORTSNET +'))     return `sportsnet+${num}`;
-  if (n.includes('STAN'))                                         return `stan${num}`;
-  if (n.includes('TSN+') || n.includes('TSN +'))                 return `tsn+${num}`;
-  if (n.includes('VICTORY+') || n.includes('VICTORY +'))         return `victory+${num}`;
-
-  return null;
+  if (pipeIdx >= 0) {
+    return channelName.substring(0, pipeIdx).trim();
+  }
+  const colonIdx = channelName.indexOf(':');
+  if (colonIdx >= 0) {
+    return channelName.substring(0, colonIdx).trim();
+  }
+  return channelName.trim();
 }
 
 // --- PLATFORM DETECTION ---
@@ -295,9 +276,9 @@ async function generateAndPushEPG() {
     const preStart  = new Date(startDate.getTime() - 720 * 60 * 1000);
     const postEnd   = getNextDay6amEST(endDate);
 
-    // Use full original channel name as display name for testing
-    const fullName    = escapeXML(ch.name);
+    const epgIdEsc    = escapeXML(epgId);
     const titleEsc    = escapeXML(title);
+    const fullNameEsc = escapeXML(ch.name);
     const platformEsc = escapeXML(platform);
     const dateStr     = startDate.toISOString().split('T')[0];
 
@@ -306,27 +287,28 @@ async function generateAndPushEPG() {
     const endXMLTV      = toXMLTVDate(endDate);
     const postEndXMLTV  = toXMLTVDate(postEnd);
 
-    // Channel block — full original name as display name
-    allChannelBlocks += `  <channel id="${epgId}">\n`;
-    allChannelBlocks += `    <display-name lang="en">${fullName}</display-name>\n`;
+    // Channel block
+    allChannelBlocks += `  <channel id="${epgIdEsc}">\n`;
+    allChannelBlocks += `    <display-name lang="en">${fullNameEsc}</display-name>\n`;
+    allChannelBlocks += `    <display-name lang="en">${epgIdEsc}</display-name>\n`;
     allChannelBlocks += `  </channel>\n`;
 
     // Block 1: Up Next
-    allProgrammeBlocks += `  <programme start="${preStartXMLTV}" stop="${startXMLTV}" channel="${epgId}">\n`;
+    allProgrammeBlocks += `  <programme start="${preStartXMLTV}" stop="${startXMLTV}" channel="${epgIdEsc}">\n`;
     allProgrammeBlocks += `    <title lang="en">Up Next: ${titleEsc}</title>\n`;
     allProgrammeBlocks += `    <desc lang="en">Coming up on ${platformEsc}: ${titleEsc} | ${dateStr}</desc>\n`;
     allProgrammeBlocks += `    <category lang="en">${platformEsc}</category>\n`;
     allProgrammeBlocks += `  </programme>\n\n`;
 
     // Block 2: The Event
-    allProgrammeBlocks += `  <programme start="${startXMLTV}" stop="${endXMLTV}" channel="${epgId}">\n`;
+    allProgrammeBlocks += `  <programme start="${startXMLTV}" stop="${endXMLTV}" channel="${epgIdEsc}">\n`;
     allProgrammeBlocks += `    <title lang="en">${titleEsc}</title>\n`;
     allProgrammeBlocks += `    <desc lang="en">${platformEsc} - ${titleEsc} | ${dateStr}</desc>\n`;
     allProgrammeBlocks += `    <category lang="en">${platformEsc}</category>\n`;
     allProgrammeBlocks += `  </programme>\n\n`;
 
     // Block 3: Ended
-    allProgrammeBlocks += `  <programme start="${endXMLTV}" stop="${postEndXMLTV}" channel="${epgId}">\n`;
+    allProgrammeBlocks += `  <programme start="${endXMLTV}" stop="${postEndXMLTV}" channel="${epgIdEsc}">\n`;
     allProgrammeBlocks += `    <title lang="en">${titleEsc} - Ended</title>\n`;
     allProgrammeBlocks += `    <desc lang="en">${platformEsc} - ${titleEsc} has ended. | ${dateStr}</desc>\n`;
     allProgrammeBlocks += `    <category lang="en">${platformEsc}</category>\n`;

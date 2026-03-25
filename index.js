@@ -14,14 +14,44 @@ const AUTH_TOKEN      = process.env.AUTH_TOKEN || 'MaryJane1905!';
 
 app.use(express.json());
 
-// --- EXTRACT CHANNEL NUMBER FROM PREFIX ---
+// --- GENERATE CLEAN EPG ID ---
+function generateEpgId(channelName) {
+  const n = channelName.toUpperCase();
+  const pipeIdx = channelName.indexOf('|');
+  const prefix = pipeIdx >= 0 ? channelName.substring(0, pipeIdx) : channelName;
+  const numMatch = prefix.match(/(\d{2,3})/);
+  const num = numMatch ? numMatch[1] : '001';
+
+  if (n.includes('BTN+') || n.includes('BTN +'))                return `btn+${num}`;
+  if (n.includes('CBC'))                                          return `cbc${num}`;
+  if (n.includes('CHL'))                                          return `chl${num}`;
+  if (n.includes('DAZN') && n.includes('CA'))                    return `cadazn${num}`;
+  if (n.includes('DAZN') && n.includes('UK'))                    return `ukdazn${num}`;
+  if (n.includes('DAZN'))                                         return `dazn${num}`;
+  if (n.includes('ESPN PLUS'))                                    return `espnplus${num}`;
+  if (n.includes('ESPN+') || n.includes('ESPN +'))               return `espn+${num}`;
+  if (n.includes('APPLE_F1') || n.includes('APPLE F1'))          return `applef1${num}`;
+  if (n.includes('FLSP') || n.includes('FLOSPORTS'))             return `flosports${num}`;
+  if (n.includes('MAX USA'))                                      return `maxusa${num}`;
+  if (n.includes('NCAAB'))                                        return `ncaab${num}`;
+  if (n.includes('PARAMOUNT+') || n.includes('PARAMOUNT +'))     return `paramount+${num}`;
+  if (n.includes('PEACOCK'))                                      return `peacock${num}`;
+  if (n.includes('SEC+') && n.includes('ACCNX'))                 return `sec+accnx${num}`;
+  if (n.includes('SEC+'))                                         return `sec+${num}`;
+  if (n.includes('SPORTSNET+') || n.includes('SPORTSNET +'))     return `sportsnet+${num}`;
+  if (n.includes('STAN'))                                         return `stan${num}`;
+  if (n.includes('TSN+') || n.includes('TSN +'))                 return `tsn+${num}`;
+  if (n.includes('VICTORY+') || n.includes('VICTORY +'))         return `victory+${num}`;
+
+  return null;
+}
+
+// --- EXTRACT CHANNEL NUMBER FOR DISPLAY NAME ---
 function extractChannelNumber(channelName) {
   const pipeIdx = channelName.indexOf('|');
   const prefix = pipeIdx >= 0 ? channelName.substring(0, pipeIdx) : channelName;
-
   const numMatch = prefix.match(/(\d{2,3})/);
   if (!numMatch) return null;
-
   const num = numMatch[1];
   const n = prefix.toUpperCase();
 
@@ -185,7 +215,7 @@ function applyTimezoneOffset(dt, timeStr) {
   const isPT = /PT|PST|PDT/i.test(timeStr);
   const isCT = /CT|CST|CDT/i.test(timeStr);
   const isMT = /MT|MST|MDT/i.test(timeStr);
-  let offset = 4; // Default EDT (UTC-4)
+  let offset = 4;
   if (isPT) offset = 7;
   if (isCT) offset = 5;
   if (isMT) offset = 6;
@@ -290,25 +320,20 @@ async function generateAndPushEPG() {
     const startDate = timeInfoToUTC(timeInfo, currentYear);
     if (!startDate || isNaN(startDate)) { skipped++; continue; }
 
-    const channelNum = extractChannelNumber(ch.name);
+    const channelNum  = extractChannelNumber(ch.name);
+    const epgId       = generateEpgId(ch.name);
     const displayTitle = channelNum ? `${channelNum} - ${title}` : title;
+
+    if (!epgId) { skipped++; continue; }
 
     const duration  = detectDuration(title);
     const endDate   = new Date(startDate.getTime() + duration * 60 * 1000);
     const preStart  = new Date(startDate.getTime() - 720 * 60 * 1000);
     const postEnd   = getNextDay6amEST(endDate);
 
-    // Use stable prefix (before pipe) as channel ID to match M3U stream names
-    const pipeIdx = ch.name.indexOf('|');
-    const stablePrefix = pipeIdx >= 0
-      ? ch.name.substring(0, pipeIdx).trim()
-      : (channelNum || title);
-    const channelId = stablePrefix;
-
-    const titleEsc      = escapeXML(displayTitle);
-    const platformEsc   = escapeXML(platform);
-    const channelIdEsc  = escapeXML(channelId);
-    const dateStr       = startDate.toISOString().split('T')[0];
+    const titleEsc    = escapeXML(displayTitle);
+    const platformEsc = escapeXML(platform);
+    const dateStr     = startDate.toISOString().split('T')[0];
 
     const preStartXMLTV = toXMLTVDate(preStart);
     const startXMLTV    = toXMLTVDate(startDate);
@@ -316,27 +341,27 @@ async function generateAndPushEPG() {
     const postEndXMLTV  = toXMLTVDate(postEnd);
 
     // Channel block
-    allChannelBlocks += `  <channel id="${channelIdEsc}">\n`;
-    allChannelBlocks += `    <display-name lang="en">${channelIdEsc}</display-name>\n`;
+    allChannelBlocks += `  <channel id="${epgId}">\n`;
     allChannelBlocks += `    <display-name lang="en">${escapeXML(channelNum || title)}</display-name>\n`;
+    allChannelBlocks += `    <display-name lang="en">${epgId}</display-name>\n`;
     allChannelBlocks += `  </channel>\n`;
 
     // Block 1: Up Next
-    allProgrammeBlocks += `  <programme start="${preStartXMLTV}" stop="${startXMLTV}" channel="${channelIdEsc}">\n`;
+    allProgrammeBlocks += `  <programme start="${preStartXMLTV}" stop="${startXMLTV}" channel="${epgId}">\n`;
     allProgrammeBlocks += `    <title lang="en">Up Next: ${titleEsc}</title>\n`;
     allProgrammeBlocks += `    <desc lang="en">Coming up on ${platformEsc}: ${titleEsc} | ${dateStr}</desc>\n`;
     allProgrammeBlocks += `    <category lang="en">${platformEsc}</category>\n`;
     allProgrammeBlocks += `  </programme>\n\n`;
 
     // Block 2: The Event
-    allProgrammeBlocks += `  <programme start="${startXMLTV}" stop="${endXMLTV}" channel="${channelIdEsc}">\n`;
+    allProgrammeBlocks += `  <programme start="${startXMLTV}" stop="${endXMLTV}" channel="${epgId}">\n`;
     allProgrammeBlocks += `    <title lang="en">${titleEsc}</title>\n`;
     allProgrammeBlocks += `    <desc lang="en">${platformEsc} - ${titleEsc} | ${dateStr}</desc>\n`;
     allProgrammeBlocks += `    <category lang="en">${platformEsc}</category>\n`;
     allProgrammeBlocks += `  </programme>\n\n`;
 
     // Block 3: Ended
-    allProgrammeBlocks += `  <programme start="${endXMLTV}" stop="${postEndXMLTV}" channel="${channelIdEsc}">\n`;
+    allProgrammeBlocks += `  <programme start="${endXMLTV}" stop="${postEndXMLTV}" channel="${epgId}">\n`;
     allProgrammeBlocks += `    <title lang="en">${titleEsc} - Ended</title>\n`;
     allProgrammeBlocks += `    <desc lang="en">${platformEsc} - ${titleEsc} has ended. | ${dateStr}</desc>\n`;
     allProgrammeBlocks += `    <category lang="en">${platformEsc}</category>\n`;

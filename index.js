@@ -9,33 +9,33 @@ const PORT = process.env.PORT || 3000;
 const XTREAM_URL      = process.env.XTREAM_URL || '';
 const XTREAM_USER     = process.env.XTREAM_USER || '';
 const XTREAM_PASS     = process.env.XTREAM_PASS || '';
-const RENDER_EPG_URL  = process.env.RENDER_EPG_URL || 'https://streaming-epg.onrender.com/upload';
-const AUTH_TOKEN      = process.env.AUTH_TOKEN || 'your-custom-token-here';
+const RENDER_EPG_URL  = process.env.RENDER_EPG_URL || 'https://sports-epg-live.onrender.com/upload';
+const AUTH_TOKEN      = process.env.AUTH_TOKEN || 'MaryJane1905!';
 
 app.use(express.json());
 
 // --- PLATFORM DETECTION ---
 function detectPlatform(channelName) {
   const n = channelName.toUpperCase();
-  if (n.includes('BTN+') || n.includes('BTN +'))         return 'Big Ten+';
-  if (n.includes('CBC'))                                   return 'CBC';
-  if (n.includes('CHL'))                                   return 'CHL';
-  if ((n.includes('DAZN') || n.includes('DAZN')) && n.includes('CA')) return 'DAZN CA';
-  if ((n.includes('DAZN') || n.includes('DAZN')) && n.includes('UK')) return 'DAZN UK';
-  if (n.includes('DAZN'))                                  return 'DAZN';
-  if (n.includes('ESPN PLUS') || n.includes('ESPN+'))      return 'ESPN+';
-  if (n.includes('APPLE_F1') || n.includes('APPLE F1'))    return 'F1 (Apple TV+)';
-  if (n.includes('FLSP') || n.includes('FLOSPORTS'))       return 'FloSports';
-  if (n.includes('MAX USA') || n.includes('HBO MAX'))      return 'HBO Max';
-  if (n.includes('NCAAB'))                                 return 'NCAAB';
-  if (n.includes('PARAMOUNT+') || n.includes('PARAMOUNT+')) return 'Paramount+';
-  if (n.includes('PEACOCK'))                               return 'Peacock';
-  if (n.includes('SEC+') || n.includes('ACCNX'))           return 'SEC+/ACC Extra';
-  if (n.includes('SPORTSNET+') || n.includes('SPORTSNET+')) return 'Sportsnet+';
-  if (n.includes('STAN'))                                  return 'Stan';
-  if (n.includes('TENNIS'))                                return 'Tennis';
-  if (n.includes('TSN+') || n.includes('TSN+'))            return 'TSN+';
-  if (n.includes('VICTORY+') || n.includes('VICTORY+'))    return 'Victory+';
+  if (n.includes('BTN+') || n.includes('BTN +'))                      return 'Big Ten+';
+  if (n.includes('CBC'))                                               return 'CBC';
+  if (n.includes('CHL'))                                               return 'CHL';
+  if (n.includes('DAZN') && n.includes('CA'))                         return 'DAZN CA';
+  if (n.includes('DAZN') && n.includes('UK'))                         return 'DAZN UK';
+  if (n.includes('DAZN'))                                              return 'DAZN';
+  if (n.includes('ESPN PLUS') || n.includes('ESPN+'))                  return 'ESPN+';
+  if (n.includes('APPLE_F1') || n.includes('APPLE F1'))               return 'F1 (Apple TV+)';
+  if (n.includes('FLSP') || n.includes('FLOSPORTS'))                  return 'FloSports';
+  if (n.includes('MAX USA') || n.includes('HBO MAX'))                  return 'HBO Max';
+  if (n.includes('NCAAB'))                                             return 'NCAAB';
+  if (n.includes('PARAMOUNT+') || n.includes('PARAMOUNT +'))          return 'Paramount+';
+  if (n.includes('PEACOCK'))                                           return 'Peacock';
+  if (n.includes('SEC+') || n.includes('ACCNX'))                      return 'SEC+/ACC Extra';
+  if (n.includes('SPORTSNET+') || n.includes('SPORTSNET +'))          return 'Sportsnet+';
+  if (n.includes('STAN'))                                              return 'Stan';
+  if (n.includes('TENNIS'))                                            return 'Tennis';
+  if (n.includes('TSN+') || n.includes('TSN +'))                      return 'TSN+';
+  if (n.includes('VICTORY+') || n.includes('VICTORY +'))              return 'Victory+';
   return null;
 }
 
@@ -45,7 +45,6 @@ function parseChannelName(channelName) {
   let timeInfo = null;
 
   // Format 1: "PREFIX | Title (datetime)"
-  // e.g. "(UK) (Dazn 001) | Chess.com Open (2026-03-25 16:00:00)"
   const pipeMatch = channelName.match(/\|\s*(.+?)\s*\((\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}(?::\d{2})?)\)/);
   if (pipeMatch) {
     title = pipeMatch[1].trim();
@@ -53,8 +52,7 @@ function parseChannelName(channelName) {
     return { title, timeInfo };
   }
 
-  // Format 2: "PREFIX | Title (date time TZ)" with dot-date
-  // e.g. "CHL 01: Title (3.25 7:00 PM ET)"
+  // Format 2: "PREFIX: Title (3.25 7:00 PM ET)"
   const dotDateMatch = channelName.match(/[:|]\s*(.+?)\s*\((\d{1,2}\.\d{2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT)?)\)/i);
   if (dotDateMatch) {
     title = dotDateMatch[1].trim();
@@ -63,7 +61,6 @@ function parseChannelName(channelName) {
   }
 
   // Format 3: "PREFIX: Title (03.25 2AM ET/11PM PT)"
-  // e.g. "ESPN PLUS 001: New Zealand vs South Africa (03.25 2AM ET/11PM PT)"
   const espnPlusMatch = channelName.match(/[:|]\s*(.+?)\s*\((\d{2}\.\d{2})\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM)\s*(?:ET|EST|EDT)?)/i);
   if (espnPlusMatch) {
     title = espnPlusMatch[1].trim();
@@ -72,7 +69,6 @@ function parseChannelName(channelName) {
   }
 
   // Format 4: "PREFIX: Title @ Mon DD HH:MM AM/PM TZ"
-  // e.g. "ESPN+ 01 : Title @ Mar 25 09:00 AM ET"
   const atMatch = channelName.match(/[:|]\s*(.+?)\s*@\s*(\w{3}\s+\d{1,2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)?)/i);
   if (atMatch) {
     title = atMatch[1].trim();
@@ -81,7 +77,6 @@ function parseChannelName(channelName) {
   }
 
   // Format 5: "PREFIX: Title @ DD Mon HH:MM AM/PM TZ"
-  // e.g. "MAX USA 01 : Title @ 25 Mar 09:15 AM ET"
   const atMatch2 = channelName.match(/[:|]\s*(.+?)\s*@\s*(\d{1,2}\s+\w{3})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)?)/i);
   if (atMatch2) {
     title = atMatch2[1].trim();
@@ -90,7 +85,6 @@ function parseChannelName(channelName) {
   }
 
   // Format 6: "PREFIX: Title (03.25 HH:MM AM/PM TZ)"
-  // e.g. "SEC+ ACCNX 001: Title (03.25 12:00 PM ET)"
   const secMatch = channelName.match(/[:|]\s*(.+?)\s*\((\d{2}\.\d{2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT)?)\)/i);
   if (secMatch) {
     title = secMatch[1].trim();
@@ -107,35 +101,31 @@ function timeInfoToUTC(timeInfo, currentYear) {
     let dt;
 
     if (timeInfo.type === 'iso') {
-      // "2026-03-25 16:00:00"
       const isoStr = timeInfo.value.replace(' ', 'T');
       dt = new Date(`${isoStr}Z`);
-      // ISO times assumed to be already in UTC or EST — apply EST offset (UTC-5)
       dt.setUTCHours(dt.getUTCHours() + 5);
 
     } else if (timeInfo.type === 'dotdate') {
-      // "3.25" or "03.25" + "7:00 PM ET"
       const parts = timeInfo.date.split('.');
       const month = parseInt(parts[0]) - 1;
       const day   = parseInt(parts[1]);
       const year  = currentYear;
-      const timeStr = normalizeTime(timeInfo.time);
-      dt = new Date(Date.UTC(year, month, day, ...timeStr));
+      const [hours, minutes] = normalizeTime(timeInfo.time);
+      dt = new Date(Date.UTC(year, month, day, hours, minutes, 0));
       dt = applyTimezoneOffset(dt, timeInfo.time);
 
     } else if (timeInfo.type === 'monthday') {
-      // "Mar 25" + "09:00 AM ET"
       const dateStr = `${timeInfo.date} ${currentYear}`;
-      const timeStr = normalizeTime(timeInfo.time);
-      dt = new Date(`${dateStr} ${timeInfo.time.replace(/\s*(ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)\s*/i, '')}`);
+      const cleanTime = timeInfo.time.replace(/\s*(ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)\s*/i, '');
+      dt = new Date(`${dateStr} ${cleanTime}`);
       if (isNaN(dt)) return null;
       dt = applyTimezoneOffset(dt, timeInfo.time);
 
     } else if (timeInfo.type === 'daymonth') {
-      // "25 Mar" + "09:15 AM ET"
       const parts = timeInfo.date.split(' ');
       const dateStr = `${parts[1]} ${parts[0]} ${currentYear}`;
-      dt = new Date(`${dateStr} ${timeInfo.time.replace(/\s*(ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)\s*/i, '')}`);
+      const cleanTime = timeInfo.time.replace(/\s*(ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)\s*/i, '');
+      dt = new Date(`${dateStr} ${cleanTime}`);
       if (isNaN(dt)) return null;
       dt = applyTimezoneOffset(dt, timeInfo.time);
     }
@@ -186,7 +176,7 @@ function detectDuration(title) {
 function getNextDay6amEST(eventEndDate) {
   const next = new Date(eventEndDate);
   next.setUTCDate(next.getUTCDate() + 1);
-  next.setUTCHours(11, 0, 0, 0); // 6 AM EST = 11:00 UTC
+  next.setUTCHours(11, 0, 0, 0);
   return next;
 }
 
@@ -220,7 +210,6 @@ async function fetchXtreamChannels() {
   const catResponse = await axios.get(url);
   const categories = catResponse.data;
 
-  // Find all sports categories
   const sportsCategories = categories.filter(cat =>
     cat.category_name.toLowerCase().includes('sport')
   );
@@ -259,7 +248,6 @@ async function generateAndPushEPG() {
     const platform = detectPlatform(ch.name);
     if (!platform) { skipped++; continue; }
 
-    // Skip tennis entries (no time)
     if (platform === 'Tennis') { skipped++; continue; }
 
     const parsed = parseChannelName(ch.name);
@@ -276,15 +264,15 @@ async function generateAndPushEPG() {
     const preStart  = new Date(startDate.getTime() - 720 * 60 * 1000);
     const postEnd   = getNextDay6amEST(endDate);
 
-    const channelId      = `xtream-${platform.toLowerCase().replace(/[^a-z0-9]/g, '')}-${Buffer.from(title + startDate.toISOString()).toString('hex').slice(0, 12)}`;
-    const titleEsc       = escapeXML(title);
-    const platformEsc    = escapeXML(platform);
-    const dateStr        = startDate.toISOString().split('T')[0];
+    const channelId   = `xtream-${platform.toLowerCase().replace(/[^a-z0-9]/g, '')}-${Buffer.from(title + startDate.toISOString()).toString('hex').slice(0, 12)}`;
+    const titleEsc    = escapeXML(title);
+    const platformEsc = escapeXML(platform);
+    const dateStr     = startDate.toISOString().split('T')[0];
 
-    const preStartXMLTV  = toXMLTVDate(preStart);
-    const startXMLTV     = toXMLTVDate(startDate);
-    const endXMLTV       = toXMLTVDate(endDate);
-    const postEndXMLTV   = toXMLTVDate(postEnd);
+    const preStartXMLTV = toXMLTVDate(preStart);
+    const startXMLTV    = toXMLTVDate(startDate);
+    const endXMLTV      = toXMLTVDate(endDate);
+    const postEndXMLTV  = toXMLTVDate(postEnd);
 
     // Channel block
     allChannelBlocks += `  <channel id="${channelId}">\n`;
@@ -323,7 +311,6 @@ async function generateAndPushEPG() {
     allProgrammeBlocks +
     `</tv>`;
 
-  // Push to Render
   await axios.post(RENDER_EPG_URL, xml, {
     headers: {
       'Content-Type': 'application/xml',
@@ -334,7 +321,16 @@ async function generateAndPushEPG() {
   console.log(`[${new Date().toISOString()}] EPG pushed — ${totalEvents} events generated, ${skipped} skipped.`);
 }
 
-// --- MANUAL TRIGGER ENDPOINT ---
+// --- MANUAL TRIGGER ENDPOINTS ---
+app.get('/run', async (req, res) => {
+  res.json({ message: 'EPG generation started...' });
+  try {
+    await generateAndPushEPG();
+  } catch (err) {
+    console.error('Manual run failed:', err.message);
+  }
+});
+
 app.get('/generate', async (req, res) => {
   try {
     await generateAndPushEPG();
@@ -346,7 +342,7 @@ app.get('/generate', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send('Xtream EPG Generator is running. Visit /generate to trigger manually.');
+  res.send('Xtream EPG Generator is running. Visit /run or /generate to trigger manually.');
 });
 
 // --- SCHEDULE: RUNS EVERY DAY AT 6AM EST (11:00 UTC) ---

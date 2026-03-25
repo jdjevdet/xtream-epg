@@ -1,0 +1,362 @@
+const express = require('express');
+const axios = require('axios');
+const cron = require('node-cron');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// --- CREDENTIALS (set as environment variables on Render) ---
+const XTREAM_URL      = process.env.XTREAM_URL || '';
+const XTREAM_USER     = process.env.XTREAM_USER || '';
+const XTREAM_PASS     = process.env.XTREAM_PASS || '';
+const RENDER_EPG_URL  = process.env.RENDER_EPG_URL || 'https://streaming-epg.onrender.com/upload';
+const AUTH_TOKEN      = process.env.AUTH_TOKEN || 'your-custom-token-here';
+
+app.use(express.json());
+
+// --- PLATFORM DETECTION ---
+function detectPlatform(channelName) {
+  const n = channelName.toUpperCase();
+  if (n.includes('BTN+') || n.includes('BTN +'))         return 'Big Ten+';
+  if (n.includes('CBC'))                                   return 'CBC';
+  if (n.includes('CHL'))                                   return 'CHL';
+  if ((n.includes('DAZN') || n.includes('DAZN')) && n.includes('CA')) return 'DAZN CA';
+  if ((n.includes('DAZN') || n.includes('DAZN')) && n.includes('UK')) return 'DAZN UK';
+  if (n.includes('DAZN'))                                  return 'DAZN';
+  if (n.includes('ESPN PLUS') || n.includes('ESPN+'))      return 'ESPN+';
+  if (n.includes('APPLE_F1') || n.includes('APPLE F1'))    return 'F1 (Apple TV+)';
+  if (n.includes('FLSP') || n.includes('FLOSPORTS'))       return 'FloSports';
+  if (n.includes('MAX USA') || n.includes('HBO MAX'))      return 'HBO Max';
+  if (n.includes('NCAAB'))                                 return 'NCAAB';
+  if (n.includes('PARAMOUNT+') || n.includes('PARAMOUNT+')) return 'Paramount+';
+  if (n.includes('PEACOCK'))                               return 'Peacock';
+  if (n.includes('SEC+') || n.includes('ACCNX'))           return 'SEC+/ACC Extra';
+  if (n.includes('SPORTSNET+') || n.includes('SPORTSNET+')) return 'Sportsnet+';
+  if (n.includes('STAN'))                                  return 'Stan';
+  if (n.includes('TENNIS'))                                return 'Tennis';
+  if (n.includes('TSN+') || n.includes('TSN+'))            return 'TSN+';
+  if (n.includes('VICTORY+') || n.includes('VICTORY+'))    return 'Victory+';
+  return null;
+}
+
+// --- EXTRACT TITLE AND TIME FROM CHANNEL NAME ---
+function parseChannelName(channelName) {
+  let title = '';
+  let timeInfo = null;
+
+  // Format 1: "PREFIX | Title (datetime)"
+  // e.g. "(UK) (Dazn 001) | Chess.com Open (2026-03-25 16:00:00)"
+  const pipeMatch = channelName.match(/\|\s*(.+?)\s*\((\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}(?::\d{2})?)\)/);
+  if (pipeMatch) {
+    title = pipeMatch[1].trim();
+    timeInfo = { type: 'iso', value: pipeMatch[2] };
+    return { title, timeInfo };
+  }
+
+  // Format 2: "PREFIX | Title (date time TZ)" with dot-date
+  // e.g. "CHL 01: Title (3.25 7:00 PM ET)"
+  const dotDateMatch = channelName.match(/[:|]\s*(.+?)\s*\((\d{1,2}\.\d{2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT)?)\)/i);
+  if (dotDateMatch) {
+    title = dotDateMatch[1].trim();
+    timeInfo = { type: 'dotdate', date: dotDateMatch[2], time: dotDateMatch[3].trim() };
+    return { title, timeInfo };
+  }
+
+  // Format 3: "PREFIX: Title (03.25 2AM ET/11PM PT)"
+  // e.g. "ESPN PLUS 001: New Zealand vs South Africa (03.25 2AM ET/11PM PT)"
+  const espnPlusMatch = channelName.match(/[:|]\s*(.+?)\s*\((\d{2}\.\d{2})\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM)\s*(?:ET|EST|EDT)?)/i);
+  if (espnPlusMatch) {
+    title = espnPlusMatch[1].trim();
+    timeInfo = { type: 'dotdate', date: espnPlusMatch[2], time: espnPlusMatch[3].trim() };
+    return { title, timeInfo };
+  }
+
+  // Format 4: "PREFIX: Title @ Mon DD HH:MM AM/PM TZ"
+  // e.g. "ESPN+ 01 : Title @ Mar 25 09:00 AM ET"
+  const atMatch = channelName.match(/[:|]\s*(.+?)\s*@\s*(\w{3}\s+\d{1,2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)?)/i);
+  if (atMatch) {
+    title = atMatch[1].trim();
+    timeInfo = { type: 'monthday', date: atMatch[2].trim(), time: atMatch[3].trim() };
+    return { title, timeInfo };
+  }
+
+  // Format 5: "PREFIX: Title @ DD Mon HH:MM AM/PM TZ"
+  // e.g. "MAX USA 01 : Title @ 25 Mar 09:15 AM ET"
+  const atMatch2 = channelName.match(/[:|]\s*(.+?)\s*@\s*(\d{1,2}\s+\w{3})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)?)/i);
+  if (atMatch2) {
+    title = atMatch2[1].trim();
+    timeInfo = { type: 'daymonth', date: atMatch2[2].trim(), time: atMatch2[3].trim() };
+    return { title, timeInfo };
+  }
+
+  // Format 6: "PREFIX: Title (03.25 HH:MM AM/PM TZ)"
+  // e.g. "SEC+ ACCNX 001: Title (03.25 12:00 PM ET)"
+  const secMatch = channelName.match(/[:|]\s*(.+?)\s*\((\d{2}\.\d{2})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:ET|EST|EDT|PT|PST|PDT)?)\)/i);
+  if (secMatch) {
+    title = secMatch[1].trim();
+    timeInfo = { type: 'dotdate', date: secMatch[2], time: secMatch[3].trim() };
+    return { title, timeInfo };
+  }
+
+  return null;
+}
+
+// --- CONVERT TIME INFO TO UTC DATE ---
+function timeInfoToUTC(timeInfo, currentYear) {
+  try {
+    let dt;
+
+    if (timeInfo.type === 'iso') {
+      // "2026-03-25 16:00:00"
+      const isoStr = timeInfo.value.replace(' ', 'T');
+      dt = new Date(`${isoStr}Z`);
+      // ISO times assumed to be already in UTC or EST — apply EST offset (UTC-5)
+      dt.setUTCHours(dt.getUTCHours() + 5);
+
+    } else if (timeInfo.type === 'dotdate') {
+      // "3.25" or "03.25" + "7:00 PM ET"
+      const parts = timeInfo.date.split('.');
+      const month = parseInt(parts[0]) - 1;
+      const day   = parseInt(parts[1]);
+      const year  = currentYear;
+      const timeStr = normalizeTime(timeInfo.time);
+      dt = new Date(Date.UTC(year, month, day, ...timeStr));
+      dt = applyTimezoneOffset(dt, timeInfo.time);
+
+    } else if (timeInfo.type === 'monthday') {
+      // "Mar 25" + "09:00 AM ET"
+      const dateStr = `${timeInfo.date} ${currentYear}`;
+      const timeStr = normalizeTime(timeInfo.time);
+      dt = new Date(`${dateStr} ${timeInfo.time.replace(/\s*(ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)\s*/i, '')}`);
+      if (isNaN(dt)) return null;
+      dt = applyTimezoneOffset(dt, timeInfo.time);
+
+    } else if (timeInfo.type === 'daymonth') {
+      // "25 Mar" + "09:15 AM ET"
+      const parts = timeInfo.date.split(' ');
+      const dateStr = `${parts[1]} ${parts[0]} ${currentYear}`;
+      dt = new Date(`${dateStr} ${timeInfo.time.replace(/\s*(ET|EST|EDT|PT|PST|PDT|CT|CST|CDT|MT|MST|MDT)\s*/i, '')}`);
+      if (isNaN(dt)) return null;
+      dt = applyTimezoneOffset(dt, timeInfo.time);
+    }
+
+    if (!dt || isNaN(dt)) return null;
+    return dt;
+
+  } catch (err) {
+    return null;
+  }
+}
+
+function normalizeTime(timeStr) {
+  const match = timeStr.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+  if (!match) return [0, 0];
+  let hours = parseInt(match[1]);
+  const minutes = parseInt(match[2] || '0');
+  const period = match[3].toUpperCase();
+  if (period === 'AM' && hours === 12) hours = 0;
+  if (period === 'PM' && hours !== 12) hours += 12;
+  return [hours, minutes];
+}
+
+function applyTimezoneOffset(dt, timeStr) {
+  const isPT = /PT|PST|PDT/i.test(timeStr);
+  const isCT = /CT|CST|CDT/i.test(timeStr);
+  const isMT = /MT|MST|MDT/i.test(timeStr);
+  let offset = 4; // Default EDT (UTC-4)
+  if (isPT) offset = 7;
+  if (isCT) offset = 5;
+  if (isMT) offset = 6;
+  dt.setUTCHours(dt.getUTCHours() + offset);
+  return dt;
+}
+
+// --- SMART DURATION DETECTION ---
+function detectDuration(title) {
+  const t = title.toLowerCase();
+  if (/\bgolf\b/.test(t) || /\bnascar\b/.test(t) || /\bcycling\b/.test(t) || /\bmarathon\b/.test(t) || /\bindycar\b/.test(t) || /\bf1\b|formula 1/.test(t)) return 240;
+  if (/\bnfl\b/.test(t) || /\bnba\b/.test(t) || /\bnhl\b/.test(t) || /\bmlb\b/.test(t) || /\bufc\b/.test(t) || /\bmma\b/.test(t) || /\bboxing\b/.test(t) || /\bwwe\b/.test(t) || /\bfight\b/.test(t)) return 180;
+  if (/\bvs\.?\b/.test(t) || / @ /.test(t) || /\bfinal\b/.test(t) || /\bplayoff\b/.test(t) || /\bchampionship\b/.test(t) || /\bmatch\b/.test(t) || /\bgame\b/.test(t)) return 120;
+  if (/\bhighlights\b/.test(t) || /\brecap\b/.test(t) || /\bnews\b/.test(t)) return 30;
+  if (/\bshow\b/.test(t) || /\bdaily\b/.test(t) || /\bpress conference\b/.test(t) || /\bdraft\b/.test(t)) return 60;
+  return 60;
+}
+
+// --- CALCULATE END TIME AT 6AM EST NEXT DAY ---
+function getNextDay6amEST(eventEndDate) {
+  const next = new Date(eventEndDate);
+  next.setUTCDate(next.getUTCDate() + 1);
+  next.setUTCHours(11, 0, 0, 0); // 6 AM EST = 11:00 UTC
+  return next;
+}
+
+// --- XMLTV HELPERS ---
+function escapeXML(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function toXMLTVDate(dt) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return (
+    `${dt.getUTCFullYear()}` +
+    `${pad(dt.getUTCMonth() + 1)}` +
+    `${pad(dt.getUTCDate())}` +
+    `${pad(dt.getUTCHours())}` +
+    `${pad(dt.getUTCMinutes())}` +
+    `${pad(dt.getUTCSeconds())}` +
+    ` +0000`
+  );
+}
+
+// --- FETCH CHANNELS FROM XTREAM API ---
+async function fetchXtreamChannels() {
+  console.log(`[${new Date().toISOString()}] Fetching channels from Xtream API...`);
+
+  const url = `${XTREAM_URL}/player_api.php?username=${XTREAM_USER}&password=${XTREAM_PASS}&action=get_live_categories`;
+  const catResponse = await axios.get(url);
+  const categories = catResponse.data;
+
+  // Find all sports categories
+  const sportsCategories = categories.filter(cat =>
+    cat.category_name.toLowerCase().includes('sport')
+  );
+
+  console.log(`Found ${sportsCategories.length} sports categories`);
+
+  let allChannels = [];
+
+  for (const cat of sportsCategories) {
+    const streamsUrl = `${XTREAM_URL}/player_api.php?username=${XTREAM_USER}&password=${XTREAM_PASS}&action=get_live_streams&category_id=${cat.category_id}`;
+    const streamsResponse = await axios.get(streamsUrl);
+    const streams = streamsResponse.data;
+    allChannels = allChannels.concat(streams.map(s => ({
+      name: s.name,
+      category: cat.category_name
+    })));
+  }
+
+  console.log(`Fetched ${allChannels.length} total sports channels`);
+  return allChannels;
+}
+
+// --- GENERATE EPG XML ---
+async function generateAndPushEPG() {
+  console.log(`[${new Date().toISOString()}] Starting EPG generation from Xtream API...`);
+
+  const currentYear = new Date().getUTCFullYear();
+  const channels = await fetchXtreamChannels();
+
+  let allChannelBlocks = '';
+  let allProgrammeBlocks = '';
+  let totalEvents = 0;
+  let skipped = 0;
+
+  for (const ch of channels) {
+    const platform = detectPlatform(ch.name);
+    if (!platform) { skipped++; continue; }
+
+    // Skip tennis entries (no time)
+    if (platform === 'Tennis') { skipped++; continue; }
+
+    const parsed = parseChannelName(ch.name);
+    if (!parsed || !parsed.timeInfo) { skipped++; continue; }
+
+    const { title, timeInfo } = parsed;
+    if (!title || title.length < 2) { skipped++; continue; }
+
+    const startDate = timeInfoToUTC(timeInfo, currentYear);
+    if (!startDate || isNaN(startDate)) { skipped++; continue; }
+
+    const duration  = detectDuration(title);
+    const endDate   = new Date(startDate.getTime() + duration * 60 * 1000);
+    const preStart  = new Date(startDate.getTime() - 720 * 60 * 1000);
+    const postEnd   = getNextDay6amEST(endDate);
+
+    const channelId      = `xtream-${platform.toLowerCase().replace(/[^a-z0-9]/g, '')}-${Buffer.from(title + startDate.toISOString()).toString('hex').slice(0, 12)}`;
+    const titleEsc       = escapeXML(title);
+    const platformEsc    = escapeXML(platform);
+    const dateStr        = startDate.toISOString().split('T')[0];
+
+    const preStartXMLTV  = toXMLTVDate(preStart);
+    const startXMLTV     = toXMLTVDate(startDate);
+    const endXMLTV       = toXMLTVDate(endDate);
+    const postEndXMLTV   = toXMLTVDate(postEnd);
+
+    // Channel block
+    allChannelBlocks += `  <channel id="${channelId}">\n`;
+    allChannelBlocks += `    <display-name lang="en">${platformEsc}: ${titleEsc}</display-name>\n`;
+    allChannelBlocks += `  </channel>\n`;
+
+    // Block 1: Up Next
+    allProgrammeBlocks += `  <programme start="${preStartXMLTV}" stop="${startXMLTV}" channel="${channelId}">\n`;
+    allProgrammeBlocks += `    <title lang="en">Up Next: ${titleEsc}</title>\n`;
+    allProgrammeBlocks += `    <desc lang="en">Coming up on ${platformEsc}: ${titleEsc} | ${dateStr}</desc>\n`;
+    allProgrammeBlocks += `    <category lang="en">${platformEsc}</category>\n`;
+    allProgrammeBlocks += `  </programme>\n\n`;
+
+    // Block 2: The Event
+    allProgrammeBlocks += `  <programme start="${startXMLTV}" stop="${endXMLTV}" channel="${channelId}">\n`;
+    allProgrammeBlocks += `    <title lang="en">${titleEsc}</title>\n`;
+    allProgrammeBlocks += `    <desc lang="en">${platformEsc} - ${titleEsc} | ${dateStr}</desc>\n`;
+    allProgrammeBlocks += `    <category lang="en">${platformEsc}</category>\n`;
+    allProgrammeBlocks += `  </programme>\n\n`;
+
+    // Block 3: Ended
+    allProgrammeBlocks += `  <programme start="${endXMLTV}" stop="${postEndXMLTV}" channel="${channelId}">\n`;
+    allProgrammeBlocks += `    <title lang="en">${titleEsc} - Ended</title>\n`;
+    allProgrammeBlocks += `    <desc lang="en">${platformEsc} - ${titleEsc} has ended. | ${dateStr}</desc>\n`;
+    allProgrammeBlocks += `    <category lang="en">${platformEsc}</category>\n`;
+    allProgrammeBlocks += `  </programme>\n\n`;
+
+    totalEvents++;
+  }
+
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<!DOCTYPE tv SYSTEM "xmltv.dtd">\n` +
+    `<tv generator-info-name="XtreamEPG">\n\n` +
+    allChannelBlocks + `\n` +
+    allProgrammeBlocks +
+    `</tv>`;
+
+  // Push to Render
+  await axios.post(RENDER_EPG_URL, xml, {
+    headers: {
+      'Content-Type': 'application/xml',
+      'x-auth-token': AUTH_TOKEN
+    }
+  });
+
+  console.log(`[${new Date().toISOString()}] EPG pushed — ${totalEvents} events generated, ${skipped} skipped.`);
+}
+
+// --- MANUAL TRIGGER ENDPOINT ---
+app.get('/generate', async (req, res) => {
+  try {
+    await generateAndPushEPG();
+    res.json({ success: true, message: 'EPG generated and pushed successfully!' });
+  } catch (err) {
+    console.error('Error generating EPG:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/', (req, res) => {
+  res.send('Xtream EPG Generator is running. Visit /generate to trigger manually.');
+});
+
+// --- SCHEDULE: RUNS EVERY DAY AT 6AM EST (11:00 UTC) ---
+cron.schedule('0 11 * * *', () => {
+  console.log('Running scheduled EPG generation...');
+  generateAndPushEPG().catch(err => console.error('Scheduled run failed:', err.message));
+});
+
+// --- START SERVER + RUN IMMEDIATELY ON BOOT ---
+app.listen(PORT, () => {
+  console.log(`Xtream EPG Generator running on port ${PORT}`);
+  generateAndPushEPG().catch(err => console.error('Initial run failed:', err.message));
+});

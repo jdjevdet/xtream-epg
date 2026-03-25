@@ -298,47 +298,45 @@ async function generateAndPushEPG() {
     const preStart  = new Date(startDate.getTime() - 720 * 60 * 1000);
     const postEnd   = getNextDay6amEST(endDate);
 
-    // Use stable prefix (everything before the pipe) as channel ID
+    // Use stable prefix (before pipe) as channel ID to match M3U stream names
     const pipeIdx = ch.name.indexOf('|');
     const stablePrefix = pipeIdx >= 0
       ? ch.name.substring(0, pipeIdx).trim()
       : (channelNum || title);
     const channelId = stablePrefix;
 
-    const titleEsc    = escapeXML(displayTitle);
-    const platformEsc = escapeXML(platform);
-    const dateStr     = startDate.toISOString().split('T')[0];
-    const shortNum    = channelNum ? channelNum.replace(/\s+/g, ' ').trim() : null;
+    const titleEsc      = escapeXML(displayTitle);
+    const platformEsc   = escapeXML(platform);
+    const channelIdEsc  = escapeXML(channelId);
+    const dateStr       = startDate.toISOString().split('T')[0];
 
     const preStartXMLTV = toXMLTVDate(preStart);
     const startXMLTV    = toXMLTVDate(startDate);
     const endXMLTV      = toXMLTVDate(endDate);
     const postEndXMLTV  = toXMLTVDate(postEnd);
 
-    // Channel block — stable prefix as ID for consistent auto-matching
-    allChannelBlocks += `  <channel id="${escapeXML(stablePrefix)}">\n`;
-    allChannelBlocks += `    <display-name lang="en">${escapeXML(stablePrefix)}</display-name>\n`;
-    if (shortNum) {
-      allChannelBlocks += `    <display-name lang="en">${escapeXML(channelNum)}</display-name>\n`;
-    }
+    // Channel block
+    allChannelBlocks += `  <channel id="${channelIdEsc}">\n`;
+    allChannelBlocks += `    <display-name lang="en">${channelIdEsc}</display-name>\n`;
+    allChannelBlocks += `    <display-name lang="en">${escapeXML(channelNum || title)}</display-name>\n`;
     allChannelBlocks += `  </channel>\n`;
 
     // Block 1: Up Next
-    allProgrammeBlocks += `  <programme start="${preStartXMLTV}" stop="${startXMLTV}" channel="${escapeXML(channelId)}">\n`;
+    allProgrammeBlocks += `  <programme start="${preStartXMLTV}" stop="${startXMLTV}" channel="${channelIdEsc}">\n`;
     allProgrammeBlocks += `    <title lang="en">Up Next: ${titleEsc}</title>\n`;
     allProgrammeBlocks += `    <desc lang="en">Coming up on ${platformEsc}: ${titleEsc} | ${dateStr}</desc>\n`;
     allProgrammeBlocks += `    <category lang="en">${platformEsc}</category>\n`;
     allProgrammeBlocks += `  </programme>\n\n`;
 
     // Block 2: The Event
-    allProgrammeBlocks += `  <programme start="${startXMLTV}" stop="${endXMLTV}" channel="${escapeXML(channelId)}">\n`;
+    allProgrammeBlocks += `  <programme start="${startXMLTV}" stop="${endXMLTV}" channel="${channelIdEsc}">\n`;
     allProgrammeBlocks += `    <title lang="en">${titleEsc}</title>\n`;
     allProgrammeBlocks += `    <desc lang="en">${platformEsc} - ${titleEsc} | ${dateStr}</desc>\n`;
     allProgrammeBlocks += `    <category lang="en">${platformEsc}</category>\n`;
     allProgrammeBlocks += `  </programme>\n\n`;
 
     // Block 3: Ended
-    allProgrammeBlocks += `  <programme start="${endXMLTV}" stop="${postEndXMLTV}" channel="${escapeXML(channelId)}">\n`;
+    allProgrammeBlocks += `  <programme start="${endXMLTV}" stop="${postEndXMLTV}" channel="${channelIdEsc}">\n`;
     allProgrammeBlocks += `    <title lang="en">${titleEsc} - Ended</title>\n`;
     allProgrammeBlocks += `    <desc lang="en">${platformEsc} - ${titleEsc} has ended. | ${dateStr}</desc>\n`;
     allProgrammeBlocks += `    <category lang="en">${platformEsc}</category>\n`;

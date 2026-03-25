@@ -322,6 +322,8 @@ async function generateAndPushEPG() {
       allChannelBlocks += `    <display-name lang="en">UK (${escapeXML(shortNum)})</display-name>\n`;
       allChannelBlocks += `    <display-name lang="en">AU (${escapeXML(shortNum)})</display-name>\n`;
       allChannelBlocks += `    <display-name lang="en">(${escapeXML(shortNum)})</display-name>\n`;
+      // Full original channel name for exact matching
+      allChannelBlocks += `    <display-name lang="en">${escapeXML(ch.name)}</display-name>\n`;
     }
     allChannelBlocks += `  </channel>\n`;
 
